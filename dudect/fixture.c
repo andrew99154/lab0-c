@@ -64,37 +64,11 @@ static void differentiate(int64_t *exec_times,
         exec_times[i] = after_ticks[i] - before_ticks[i];
 }
 
-static int cmp_double(const void *a, const void *b)
-{
-    double da = *(const double *) a;
-    double db = *(const double *) b;
-    return (da < db) ? -1 : (da > db) ? 1 : 0;
-}
-
 static int cmp(const int64_t *a, const int64_t *b)
 {
     if (*a == *b)
         return 0;
     return (*a > *b) ? 1 : -1;
-}
-
-static double trimmed_mean(double *vals, size_t count)
-{
-    // calculate the mean of multiple t-values under different percentile
-    // sort and crop the extreme value
-    qsort(vals, count, sizeof(double), cmp_double);
-    size_t trim = (size_t) (count * 0.1);
-    size_t start = trim;
-    size_t end = count - trim;
-    if (end <= start) {
-        start = 0;
-        end = count;
-    }
-    double sum = 0.0;
-    for (size_t i = start; i < end; i++) {
-        sum += vals[i];
-    }
-    return sum / (end - start);
 }
 
 static void update_statistics(const int64_t *exec_times,
@@ -120,25 +94,24 @@ static void update_statistics(const int64_t *exec_times,
 
 static bool report(void)
 {
-    // double max_t = fabs(t_compute(t));
-    double number_traces = t_array[0]->n[0] + t_array[0]->n[1];
-    // double max_tau = max_t / sqrt(number_traces_max_t);
+    double number_traces_max_t = t_array[0]->n[0] + t_array[0]->n[1];
 
     printf("\033[A\033[2K");
-    printf("meas: %7.2lf M, ", (number_traces / 1e6));
-    if (number_traces < ENOUGH_MEASURE) {
+    printf("meas: %7.2lf M, ", (number_traces_max_t / 1e6));
+    if (number_traces_max_t < ENOUGH_MEASURE) {
         printf("not enough measurements (%.0f still to go).\n",
-               ENOUGH_MEASURE - number_traces);
+               ENOUGH_MEASURE - number_traces_max_t);
         return false;
     }
 
-    double t_values[N_PERCENTILES + 1];
+    double max_t = 0;
     for (size_t i = 0; i < N_PERCENTILES + 1; i++) {
-        t_values[i] = fabs(t_compute(t_array[i]));
+        int t_value_tmp = fabs(t_compute(t_array[i]));
+        if (t_value_tmp > max_t)
+            max_t = t_value_tmp;
     }
 
-    double mean_t = trimmed_mean(t_values, N_PERCENTILES + 1);
-    double tau = mean_t / sqrt(number_traces);
+    double max_tau = max_t / sqrt(number_traces_max_t);
 
     /* max_t: the t statistic value
      * max_tau: a t value normalized by sqrt(number of measurements).
@@ -150,15 +123,15 @@ static bool report(void)
      *            detect the leak, if present. "barely detect the
      *            leak" = have a t value greater than 5.
      */
-    printf("trimmed mean t: %+7.2f, tau: %.2e, (5/tau)^2: %.2e.\n", mean_t, tau,
-           (double) (5 * 5) / (double) (tau * tau));
+    printf("max t: %+7.2f, tau: %.2e, (5/tau)^2: %.2e.\n", max_t, max_tau,
+           (double) (5 * 5) / (double) (max_tau * max_tau));
 
     /* Definitely not constant time */
-    if (mean_t > t_threshold_bananas)
+    if (max_t > t_threshold_bananas)
         return false;
 
     /* Probably not constant time. */
-    if (mean_t > t_threshold_moderate)
+    if (max_t > t_threshold_moderate)
         return false;
 
     /* For the moment, maybe constant time. */
