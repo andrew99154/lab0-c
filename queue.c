@@ -9,6 +9,16 @@ static inline int cmp_val(const char *a, const char *b, bool descend)
     return descend ? -strcmp(a, b) : strcmp(a, b);
 }
 
+static inline int q_cmp(bool descend,
+                        const struct list_head *a,
+                        const struct list_head *b)
+{
+    const element_t *ea = list_entry(a, element_t, list);
+    const element_t *eb = list_entry(b, element_t, list);
+    int cmp_res = strcmp(ea->value, eb->value);
+    return descend ? -cmp_res : cmp_res;
+}
+
 element_t *create_entry(const char *s)
 {
     element_t *entry = malloc(sizeof(element_t));
@@ -245,55 +255,37 @@ void q_reverseK(struct list_head *head, int k)
     }
 }
 
-void merge_two_sorted_list(struct list_head *dest,
-                           struct list_head *src,
-                           bool descend)
+static struct list_head *merge_two_sorted_list(bool descend,
+                                               struct list_head *a,
+                                               struct list_head *b)
 {
-    struct list_head *curr, *next, *dest_tail = dest->next;
-    list_for_each_safe (curr, next, src) {
-        const char *curr_val = list_entry(curr, element_t, list)->value;
-        while (dest_tail != dest &&
-               cmp_val(curr_val, list_entry(dest_tail, element_t, list)->value,
-                       descend) >= 0)
-            dest_tail = dest_tail->next;
+    struct list_head guard;
+    struct list_head *tail = &guard;
 
-        list_del(curr);
-        list_add(curr, dest_tail->prev);
+    while (a && b) {
+        if (q_cmp(descend, a, b) <= 0) {
+            tail->next = a;
+            a->prev = tail;
+            tail = a;
+            a = a->next;
+        } else {
+            tail->next = b;
+            b->prev = tail;
+            tail = b;
+            b = b->next;
+        }
     }
-}
 
-void q_merge_sort(struct list_head *head, bool descend)
-{
-    if (!head || list_empty(head) || list_is_singular(head))
-        return;
-
-    LIST_HEAD(tmp_head);
-
-    struct list_head *l = head, *r = &tmp_head, *r_start = q_find_mid(head),
-                     *l_tail = r_start->prev;
-
-    // cut_from_mid
-    r->next = r_start;
-    r_start->prev = r;
-    r->prev = l->prev;
-    r->prev->next = r;
-
-    l->prev = l_tail;
-    l->prev->next = l;
-
-    q_merge_sort(l, descend);
-    q_merge_sort(r, descend);
-
-    // merge r into l
-    merge_two_sorted_list(l, r, descend);
-}
-
-/* Sort elements of queue in ascending/descending order */
-void q_sort(struct list_head *head, bool descend)
-{
-    if (!head || list_empty(head) || list_is_singular(head))
-        return;
-    q_merge_sort(head, descend);
+    if (a) {
+        tail->next = a;
+        a->prev = tail;
+    } else if (b) {
+        tail->next = b;
+        b->prev = tail;
+    } else {
+        tail->next = NULL;
+    }
+    return guard.next;
 }
 
 /* Remove every node which has a node with a strictly less value anywhere to
@@ -357,18 +349,81 @@ int q_descend(struct list_head *head)
 int q_merge(struct list_head *head, bool descend)
 {
     // https://leetcode.com/problems/merge-k-sorted-lists/
+    if (!head || list_empty(head))
+        return 0;
 
-    // queue_contex_t queue_head = list_entry(head, queue_contex_t, q);
-    queue_contex_t *curr = NULL, *next,
-                   *result = list_first_entry(head, queue_contex_t, chain);
+    queue_contex_t *curr = NULL, *ans_entry;
 
-    list_for_each_entry_safe (curr, next, head, chain) {
-        if (result == curr)
-            continue;
-        merge_two_sorted_list(result->q, curr->q, descend);
+    struct list_head *result = NULL;
+
+    list_for_each_entry (curr, head, chain) {
+        curr->q->prev->next = NULL;
+        result = merge_two_sorted_list(descend, result, curr->q->next);
+        curr->q->next = curr->q;
     }
 
-    head->next = &result->chain;
-    result->chain.prev = head;
-    return q_size(result->q);
+    ans_entry = list_entry(head->next, queue_contex_t, chain);
+    INIT_LIST_HEAD(ans_entry->q);
+
+    while (result) {
+        struct list_head *next = result->next;
+        list_add_tail(result, ans_entry->q);
+        result = next;
+    }
+
+    return q_size(ans_entry->q);
+}
+
+void q_sort(struct list_head *head, bool descend)
+{
+    struct list_head *list;
+    struct list_head *part[65];
+    int level;
+
+    if (!head || list_empty(head) || list_is_singular(head))
+        return;
+
+    // break circular
+    head->prev->next = NULL;
+    head->prev = NULL;
+
+    list = head->next;
+    INIT_LIST_HEAD(head);
+
+    // init part[]
+    memset(part, 0, sizeof(part));
+
+    while (list) {
+        struct list_head *curr = list;
+        struct list_head *next = list->next;
+
+        curr->prev = NULL;
+        curr->next = NULL;
+
+        list = next;
+
+        // the number of nodes in part[] will always be 0 or 2^level
+        // [1, 2, 4, 8, 16...] or [0, 2, 0, 0, 16] are acceptable
+        // depends on level (idx)
+        // keep merging until unable to merge
+        for (level = 0; part[level]; level++) {
+            curr = merge_two_sorted_list(descend, part[level], curr);
+            part[level] = NULL;
+        }
+        part[level] = curr;
+    }
+
+    list = NULL;
+    for (level = 0; level < (int) (sizeof(part) / sizeof(part[0])); level++) {
+        if (!part[level])
+            continue;
+        list = merge_two_sorted_list(descend, part[level], list);
+    }
+
+    // reconstruct list
+    while (list) {
+        struct list_head *next = list->next;
+        list_add_tail(list, head);
+        list = next;
+    }
 }
