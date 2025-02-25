@@ -4,11 +4,6 @@
 
 #include "queue.h"
 
-static inline int cmp_val(const char *a, const char *b, bool descend)
-{
-    return descend ? -strcmp(a, b) : strcmp(a, b);
-}
-
 static inline int q_cmp(bool descend,
                         const struct list_head *a,
                         const struct list_head *b)
