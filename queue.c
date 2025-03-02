@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "queue.h"
 
@@ -421,4 +422,40 @@ void q_sort(struct list_head *head, bool descend)
         list_add_tail(list, head);
         list = next;
     }
+}
+
+void q_shuffle(struct list_head *head)
+{
+    if (!head || list_empty(head) || list_is_singular(head))
+        return;
+
+    int len = q_size(head), i = 0;
+    struct list_head **arr = malloc(len * sizeof(struct list_head *));
+    struct list_head *curr, *tmp;
+
+    list_for_each (curr, head) {
+        arr[i++] = curr;
+    }
+
+    // srand((unsigned int) time(NULL));
+
+    for (i = len - 1; i > 0; i--) {
+        int j = rand() % (i + 1);
+        tmp = arr[i];
+        arr[i] = arr[j];
+        arr[j] = tmp;
+    }
+
+    for (i = 0; i + 1 < len; i++) {
+        arr[i]->next = arr[i + 1];
+        arr[i + 1]->prev = arr[i];
+    }
+
+    head->next = arr[0];
+    arr[0]->prev = head;
+
+    head->prev = arr[len - 1];
+    arr[len - 1]->next = head;
+
+    free(arr);
 }
